@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+use std::fs;
 use std::str;
 
 #[derive(Debug)]
@@ -109,7 +111,7 @@ impl TokenType {
 }
 
 struct Tokenizer<'a> {
-    input: &'a str,
+    input: &'a String,
     pos: usize,
     tokens: Vec<TokenType>
 }
@@ -505,50 +507,26 @@ fn next_token<'a>(tokenizer: &mut Tokenizer<'a>) -> Result<Option<TokenType>, ()
 
 
 fn main() {
-    let input = ".52
-0x02
-<<
->>
-<
-function
->
-hello.world
-func()
-.
-hello
--- hello this is a comment
---[[ HELLO
-THIS IS
-A
-MULTILINE COMMENT
-]]
-\"Local Hello\"
-ident = \"hello\"
-end
-521.224
-,
-3.1415
-[[ MULTI
-LINE
-    COMMENT
-]]
-10E+4
-12.13
-151";
+    let input = fs::read_to_string("file_test.txt").unwrap();
 
     let mut tokenizer = Tokenizer {
-        input: input,
+        input: &input,
         pos: 0,
         tokens: Vec::new()
     };
 
+    let start = Instant::now();
     while !tokenizer.is_eof() {
         let token_type = tokenizer.next().unwrap().unwrap();
         tokenizer.tokens.push(token_type);
     }
     tokenizer.tokens.push(TokenType::Eof);
 
-    for token in tokenizer.tokens {
+    for token in &tokenizer.tokens {
         println!("{:#?}", token);
     }
+
+    let duration = start.elapsed();
+    println!("tokens: {:#?}", tokenizer.tokens.len());
+    println!("duration: {:#?}", duration);
 }
