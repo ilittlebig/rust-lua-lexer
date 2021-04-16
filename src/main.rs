@@ -507,7 +507,7 @@ fn next_token<'a>(tokenizer: &mut Tokenizer<'a>) -> Result<Option<TokenType>, ()
 
 
 fn main() {
-    let input = fs::read_to_string("file_test.txt").unwrap();
+    let input = fs::read_to_string("src/file_test.txt").unwrap();
 
     let mut tokenizer = Tokenizer {
         input: &input,
@@ -522,6 +522,7 @@ fn main() {
     }
     tokenizer.tokens.push(TokenType::Eof);
 
+    #[cfg(debug_assertions)]
     for token in &tokenizer.tokens {
         println!("{:#?}", token);
     }
