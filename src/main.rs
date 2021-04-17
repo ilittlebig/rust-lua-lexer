@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::{Instant};
 use std::fs;
 use std::str;
 
@@ -110,10 +110,20 @@ impl TokenType {
     }
 }
 
+#[derive(Debug)]
+enum TokenValue {
+    None,
+    Int(i64),
+    Float(f64),
+    Str(String)
+}
+
+type LexResult = Result<(TokenType, TokenValue), ()>;
+
 struct Tokenizer<'a> {
     input: &'a String,
     pos: usize,
-    tokens: Vec<TokenType>
+    tokens: Vec<(TokenType, TokenValue)>
 }
 
 impl<'a> Tokenizer<'a> {
@@ -185,20 +195,12 @@ impl<'a> Tokenizer<'a> {
         self.is_alpha() || Tokenizer::is_digit(self.byte_at(0)) || self.is_valid_ident_start()
     }
 
-    fn next(&mut self) -> Result<Option<TokenType>, ()> {
+    fn next(&mut self) -> LexResult {
         next_token(self)
     }
 
-    fn to_hex_digit(c: u8) -> u8 {
-        if c >= b'0' && c <= b'9' {
-            return c - b'0';
-        } else {
-            return ((c as char).to_ascii_lowercase() as u8) - b'a' + 10;
-        }
-    }
-
     #[allow(irrefutable_let_patterns)]
-    fn read_single_line_comment(&mut self) -> Result<Option<TokenType>, ()> {
+    fn read_single_line_comment(&mut self) -> LexResult {
         let mut comment: Vec<u8> = Vec::new();
 
         loop {
@@ -213,15 +215,15 @@ impl<'a> Tokenizer<'a> {
             }
         }
 
-        if let _comment = str::from_utf8(&comment) {
-            Ok(Some(TokenType::SingleComment))
+        if let comment = str::from_utf8(&comment) {
+            Ok((TokenType::SingleComment, TokenValue::Str(comment.unwrap().to_string()))) // TODO: add real token value
         } else {
-            Ok(Some(TokenType::Unidentified))
+            Ok((TokenType::Unidentified, TokenValue::None))
         }
     }
 
     #[allow(irrefutable_let_patterns)]
-    fn read_multi_line_comment(&mut self) -> Result<Option<TokenType>, ()> {
+    fn read_multi_line_comment(&mut self) -> LexResult {
         let mut comment: Vec<u8> = Vec::new();
 
         loop {
@@ -236,25 +238,31 @@ impl<'a> Tokenizer<'a> {
             }
         }
 
-        if let _comment = str::from_utf8(&comment) {
-            Ok(Some(TokenType::MultiLineComment))
+        if let comment = str::from_utf8(&comment) {
+            Ok((TokenType::MultiLineComment, TokenValue::Str(comment.unwrap().to_string())))
         } else {
-            Ok(Some(TokenType::Unidentified))
+            Ok((TokenType::Unidentified, TokenValue::None))
         }
     }
 
     #[allow(irrefutable_let_patterns)]
-    fn read_string(&mut self) -> Result<Option<TokenType>, ()> {
+    fn read_string(&mut self) -> LexResult {
         let mut string: Vec<u8> = Vec::new();
         let mut is_closed = false;
 
+        let start_char = self.byte_at(0);
         self.pos += 1;
 
         loop {
-            if self.byte_at(0) != b'\"' && self.byte_at(0) != b'\'' && self.byte_at(0) != 3 {
+            if self.byte_at(0) == b'\\' {
+                string.push(self.byte_at(0));
+                string.push(self.byte_at(1));
+                self.pos += 2;
+            }
+            if self.byte_at(0) != start_char && self.byte_at(0) != 3 {
                 string.push(self.byte_at(0));
                 self.pos += 1;
-            } else if self.byte_at(0) == b'\"' || self.byte_at(0) == b'\'' {
+            } else if self.byte_at(0) == start_char {
                 is_closed = true;
                 self.pos += 1;
                 break;
@@ -263,19 +271,19 @@ impl<'a> Tokenizer<'a> {
             }
         }
 
-        if let _string = str::from_utf8(&string) {
+        if let string = str::from_utf8(&string) {
             if is_closed {
-                Ok(Some(TokenType::StringLiteral))
+                Ok((TokenType::StringLiteral, TokenValue::Str(string.unwrap().to_string())))
             } else {
-                Ok(Some(TokenType::UnclosedStringLiteral))
+                Ok((TokenType::UnclosedStringLiteral, TokenValue::None))
             }
         } else {
-            Ok(Some(TokenType::Unidentified))
+            Ok((TokenType::Unidentified, TokenValue::None))
         }
     }
 
     #[allow(irrefutable_let_patterns)]
-    fn read_digit(&mut self) -> Result<Option<TokenType>, ()> {
+    fn read_digit(&mut self) -> LexResult {
         let mut num_str: Vec<u8> = Vec::new();
         let mut hex = false;
 
@@ -308,200 +316,209 @@ impl<'a> Tokenizer<'a> {
         }
 
         if let string = str::from_utf8(&num_str) {
-            let num = self.string_to_number(string.unwrap());
-            match num {
-                Some(TokenType::Int) => Ok(Some(TokenType::Int)),
-                Some(TokenType::Float) => Ok(Some(TokenType::Float)),
-                _ => Ok(None)
+            let num = self.string_to_number(string.unwrap()).unwrap();
+            match num.0 {
+                TokenType::Int => Ok((TokenType::Int, num.1)),
+                TokenType::Float => Ok((TokenType::Float, num.1)),
+                _ => Ok((TokenType::Unidentified, TokenValue::None))
             }
         } else {
-            Ok(Some(TokenType::Unidentified))
+            Ok((TokenType::Unidentified, TokenValue::None))
         }
     }
 
-    fn string_to_number(&mut self, string: &str) -> Option<TokenType> {
-        if let Some(_n) = self.string_to_int(string) {
-            Some(TokenType::Int)
-        } else if let Some(_t) = self.string_to_float(string) {
-            Some(TokenType::Float)
+    fn string_to_number(&mut self, string: &str) -> Result<(TokenType, TokenValue), ()> {
+        if let Some(n) = self.string_to_int(string) {
+            Ok((TokenType::Int, n))
+        } else if let Some(t) = self.string_to_float(string) {
+            Ok((TokenType::Float, t))
         } else {
-            None
+            Ok((TokenType::Unidentified, TokenValue::None))
         }
     }
 
-    fn string_to_int(&mut self, string: &str) -> Option<TokenType> {
+    fn string_to_int(&mut self, string: &str) -> Option<TokenValue> {
         let bytes = string.as_bytes();
         let len = bytes.len();
 
-        let mut r = 0;
-        let mut i = 0;
+        let mut decimal = 0;
+        let mut base: i64 = 1;
 
         if bytes.starts_with(b"0x") {
-            i += 2;
-            while i < len && Tokenizer::is_hex_digit(bytes[i]) {
-                r = (r << 4) + Tokenizer::to_hex_digit(bytes[i]);
-                i += 1;
+            for i in (0..len).rev() {
+                if bytes[i] >= b'0' && bytes[i] <= b'9' {
+                    decimal += (bytes[i] as i64 - 48 as i64) * base;
+                } else if bytes[i] >= b'A' && bytes[i] <= b'F' {
+                    decimal += (bytes[i] as i64 - 55 as i64) * base;
+                } else if bytes[i] >= b'a' && bytes[i] <= b'f' {
+                    decimal += (bytes[i] as i64 - 87 as i64) * base;
+                }
+                base *= 16;
             }
-            Some(TokenType::Int)
+
+            Some(TokenValue::Int(decimal.into()))
         } else {
-            if let Ok(_i) = string.parse::<i32>() {
-                Some(TokenType::Int)
+            if let Ok(i) = string.parse::<i64>() {
+                Some(TokenValue::Int(i))
             } else {
                 None
             }
         }
     }
 
-    fn string_to_float(&self, string: &str) -> Option<TokenType> {
-        if let Ok(_i) = string.parse::<f32>() {
-            Some(TokenType::Float)
+    fn string_to_float(&self, string: &str) -> Option<TokenValue> {
+        if let Ok(f) = string.parse::<f64>() {
+            Some(TokenValue::Float(f))
         } else {
             None
         }
     }
+
+    fn read_other_tokens(&mut self) -> LexResult {
+        let token_type = match self.byte_at(0) {
+            b';' => {
+                self.pos += 1;
+                Some(TokenType::Semicolon)
+            },
+            b',' => {
+                self.pos += 1;
+                Some(TokenType::Comma)
+            },
+            b'&' => {
+                self.pos += 1;
+                Some(TokenType::BAnd)
+            },
+            b'|' => {
+                self.pos += 1;
+                Some(TokenType::BOr)
+            },
+            b'(' => {
+                self.pos += 1;
+                Some(TokenType::LeftParenthesis)
+            },
+            b')' => {
+                self.pos += 1;
+                Some(TokenType::RightParenthesis)
+            },
+            b']' => {
+                self.pos += 1;
+                Some(TokenType::RightSquareBracket)
+            },
+            b'{' => {
+                self.pos += 1;
+                Some(TokenType::LeftCurlyBracket)
+            },
+            b'}' => {
+                self.pos += 1;
+                Some(TokenType::RightCurlyBracket)
+            },
+            b'+' => {
+                self.pos += 1;
+                Some(TokenType::Add)
+            },
+            b'*' => {
+                self.pos += 1;
+                Some(TokenType::Mul)
+            },
+            b'/' => {
+                self.pos += 1;
+                Some(TokenType::Div)
+            },
+            b'%' => {
+                self.pos += 1;
+                Some(TokenType::Mod)
+            },
+            b'^' => {
+                self.pos += 1;
+                Some(TokenType::Pow)
+            },
+            b'#' => {
+                self.pos += 1;
+                Some(TokenType::Len)
+            },
+            _ => None
+        };
+
+        if let Some(t) = token_type {
+            Ok((t, TokenValue::None))
+        } else if self.is_valid_ident_start() {
+            let mut word: Vec<u8> = Vec::new();
+
+            word.push(self.byte_at(0));
+            self.pos += 1;
+
+            while self.is_valid_ident() {
+                word.push(self.byte_at(0));
+                self.pos += 1;
+            }
+
+            if let Ok(s) = str::from_utf8(&word) {
+                if let Some(t) = TokenType::convert_to_token_type(s) {
+                    Ok((t, TokenValue::None))
+                } else {
+                    Ok((TokenType::Identifier, TokenValue::Str(s.to_string())))
+                }
+            } else {
+                Ok((TokenType::Unidentified, TokenValue::None))
+            }
+        } else {
+            Ok((TokenType::Unidentified, TokenValue::None))
+        }
+    }
 }
 
-fn next_token<'a>(tokenizer: &mut Tokenizer<'a>) -> Result<Option<TokenType>, ()> {
-    let token_type = match tokenizer.byte_at(0) {
+fn next_token<'a>(tokenizer: &mut Tokenizer<'a>) -> LexResult {
+    match tokenizer.byte_at(0) {
         _ if tokenizer.is_whitespace() => {
             tokenizer.pos += 1;
-            Some(TokenType::Whitespace)
+            Ok((TokenType::Whitespace, TokenValue::None))
         }
-        _ if Tokenizer::is_digit(tokenizer.byte_at(0)) => tokenizer.read_digit()?,
-        _ if tokenizer.is_escape_char() => {tokenizer.pos += 1; Some(TokenType::Whitespace)}
+        _ if Tokenizer::is_digit(tokenizer.byte_at(0)) => Ok(tokenizer.read_digit()?),
+        _ if tokenizer.is_escape_char() => {tokenizer.pos += 1; Ok((TokenType::Whitespace, TokenValue::None))}
 
-        b'\"' | b'\'' => tokenizer.read_string()?,
+        b'\"' | b'\'' => Ok(tokenizer.read_string()?),
         b'>' => {
-            if tokenizer.starts_with(b">=") {tokenizer.pos += 2; Some(TokenType::GreaterOrEqual)}
-            else if tokenizer.starts_with(b">>") {tokenizer.pos += 2; Some(TokenType::ShiftRight)}
-            else {tokenizer.pos += 1; Some(TokenType::Greater)}
+            if tokenizer.starts_with(b">=") {tokenizer.pos += 2; Ok((TokenType::GreaterOrEqual, TokenValue::None))}
+            else if tokenizer.starts_with(b">>") {tokenizer.pos += 2; Ok((TokenType::ShiftRight, TokenValue::None))}
+            else {tokenizer.pos += 1; Ok((TokenType::Greater, TokenValue::None))}
         },
         b'.' => {
-            if tokenizer.starts_with(b"..") {tokenizer.pos += 2; Some(TokenType::Concat)}
-            else if tokenizer.starts_with(b"...") {tokenizer.pos += 3; Some(TokenType::Dots)}
+            if tokenizer.starts_with(b"..") {tokenizer.pos += 2; Ok((TokenType::Concat, TokenValue::None))}
+            else if tokenizer.starts_with(b"...") {tokenizer.pos += 3; Ok((TokenType::Dots, TokenValue::None))}
             else {
                 match tokenizer.byte_at(1) {
-                    b'0'..=b'9' => {(); tokenizer.read_digit()?},
-                    _ => {tokenizer.pos += 1; Some(TokenType::Attr)}
+                    b'0'..=b'9' => {(); Ok(tokenizer.read_digit()?)},
+                    _ => {tokenizer.pos += 1; Ok((TokenType::Attr, TokenValue::None))}
                 }
             }
         },
         b'=' => {
-            if tokenizer.starts_with(b"==") {tokenizer.pos += 2; Some(TokenType::Concat)}
-            else {tokenizer.pos += 1; Some(TokenType::Assign)}
+            if tokenizer.starts_with(b"==") {tokenizer.pos += 2; Ok((TokenType::Concat, TokenValue::None))}
+            else {tokenizer.pos += 1; Ok((TokenType::Assign, TokenValue::None))}
         },
         b'<' => {
-            if tokenizer.starts_with(b"<=") {tokenizer.pos += 2; Some(TokenType::LessOrEqual)}
-            else if tokenizer.starts_with(b"<<") {tokenizer.pos += 2; Some(TokenType::ShiftLeft)}
-            else {tokenizer.pos += 1; Some(TokenType::Less)}
+            if tokenizer.starts_with(b"<=") {tokenizer.pos += 2; Ok((TokenType::LessOrEqual, TokenValue::None))}
+            else if tokenizer.starts_with(b"<<") {tokenizer.pos += 2; Ok((TokenType::ShiftLeft, TokenValue::None))}
+            else {tokenizer.pos += 1; Ok((TokenType::Less, TokenValue::None))}
         },
         b'~' => {
-            if tokenizer.starts_with(b"~=") {tokenizer.pos += 2; Some(TokenType::NotEqual)}
-            else {tokenizer.pos += 1; Some(TokenType::BXor)}
+            if tokenizer.starts_with(b"~=") {tokenizer.pos += 2; Ok((TokenType::NotEqual, TokenValue::None))}
+            else {tokenizer.pos += 1; Ok((TokenType::BXor, TokenValue::None))}
         },
         b':' => {
-            if tokenizer.starts_with(b"::") {tokenizer.pos += 2; Some(TokenType::DoubleColon)}
-            else {tokenizer.pos += 1; Some(TokenType::Colon)}
-        },
-        b';' => {
-            tokenizer.pos += 1;
-            Some(TokenType::Semicolon)
-        },
-        b',' => {
-            tokenizer.pos += 1;
-            Some(TokenType::Comma)
-        },
-        b'&' => {
-            tokenizer.pos += 1;
-            Some(TokenType::BAnd)
-        },
-        b'|' => {
-            tokenizer.pos += 1;
-            Some(TokenType::BOr)
-        },
-
-        b'(' => {
-            tokenizer.pos += 1;
-            Some(TokenType::LeftParenthesis)
-        },
-        b')' => {
-            tokenizer.pos += 1;
-            Some(TokenType::RightParenthesis)
+            if tokenizer.starts_with(b"::") {tokenizer.pos += 2; Ok((TokenType::DoubleColon, TokenValue::None))}
+            else {tokenizer.pos += 1; Ok((TokenType::Colon, TokenValue::None))}
         },
         b'[' => {
-            if tokenizer.starts_with(b"[[") {tokenizer.pos += 2; tokenizer.read_multi_line_comment()?}
-            else {tokenizer.pos += 1; Some(TokenType::LeftSquareBracket)}
-        },
-        b']' => {
-            tokenizer.pos += 1;
-            Some(TokenType::RightSquareBracket)
-        },
-        b'{' => {
-            tokenizer.pos += 1;
-            Some(TokenType::LeftCurlyBracket)
-        },
-        b'}' => {
-            tokenizer.pos += 1;
-            Some(TokenType::RightCurlyBracket)
-        },
-
-        b'+' => {
-            tokenizer.pos += 1;
-            Some(TokenType::Add)
+            if tokenizer.starts_with(b"[[") {tokenizer.pos += 2; Ok(tokenizer.read_multi_line_comment()?)}
+            else {tokenizer.pos += 1; Ok((TokenType::LeftSquareBracket, TokenValue::None))}
         },
         b'-' => {
-            if tokenizer.starts_with(b"--[[") {tokenizer.pos += 4; tokenizer.read_multi_line_comment()?}
-            else if tokenizer.starts_with(b"--") {tokenizer.pos += 2; tokenizer.read_single_line_comment()?}
-            else {tokenizer.pos += 1; Some(TokenType::Minus)}
+            if tokenizer.starts_with(b"--[[") {tokenizer.pos += 4; Ok(tokenizer.read_multi_line_comment()?)}
+            else if tokenizer.starts_with(b"--") {tokenizer.pos += 2; Ok(tokenizer.read_single_line_comment()?)}
+            else {tokenizer.pos += 1; Ok((TokenType::Minus, TokenValue::None))}
         },
-        b'*' => {
-            tokenizer.pos += 1;
-            Some(TokenType::Mul)
-        },
-        b'/' => {
-            tokenizer.pos += 1;
-            Some(TokenType::Div)
-        },
-        b'%' => {
-            tokenizer.pos += 1;
-            Some(TokenType::Mod)
-        },
-        b'^' => {
-            tokenizer.pos += 1;
-            Some(TokenType::Pow)
-        },
-        b'#' => {
-            tokenizer.pos += 1;
-            Some(TokenType::Len)
-        },
-
-        _ => None
-    };
-
-    if let Some(t) = token_type {
-        Ok(Some(t))
-    } else if tokenizer.is_valid_ident_start() {
-        let mut word: Vec<u8> = Vec::new();
-
-        word.push(tokenizer.byte_at(0));
-        tokenizer.pos += 1;
-
-        while tokenizer.is_valid_ident() {
-            word.push(tokenizer.byte_at(0));
-            tokenizer.pos += 1;
-        }
-
-        if let Ok(s) = str::from_utf8(&word) {
-            if let Some(t) = TokenType::convert_to_token_type(s) {
-                Ok(Some(t))
-            } else {
-                Ok(Some(TokenType::Identifier))
-            }
-        } else {
-            Ok(Some(TokenType::Unidentified))
-        }
-    } else {
-        Ok(Some(TokenType::Unidentified))
+        _ => Ok(tokenizer.read_other_tokens()?)
     }
 }
 
@@ -517,14 +534,14 @@ fn main() {
 
     let start = Instant::now();
     while !tokenizer.is_eof() {
-        let token_type = tokenizer.next().unwrap().unwrap();
+        let token_type = tokenizer.next().unwrap();
         tokenizer.tokens.push(token_type);
     }
-    tokenizer.tokens.push(TokenType::Eof);
+    tokenizer.tokens.push((TokenType::Eof, TokenValue::None));
 
     #[cfg(debug_assertions)]
     for token in &tokenizer.tokens {
-        println!("{:#?}", token);
+        println!("type: {:#?}, value: {:#?}", token.0, token.1);
     }
 
     let duration = start.elapsed();

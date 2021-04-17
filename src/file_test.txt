@@ -1,32 +1,22 @@
-local base95 = {}
-
-function base95.encode(n)
-	local n_str = ""
-	local char_count = math.floor(log(n, base) + 1)
-	local r = n
-	local val, val_char
-
-	for pos = char_count, 1, -1 do
-		val = math.floor(r/(base^(pos-1)))
-		val_char = string.char(base_char + val)
-
-		n_str = n_str .. val_char
-		r = r - val*(base^(pos-1))
-	end
-
-	return n_str
+local hello_world = "this is \"a string\" is it?"
+123
+0x100
+local function hello_world(a, b)
+	local a = 2;
+	a += 5.25;
 end
-
-function base95.decode(str)
-	local str_len = string.len(str)
-	local n = 0
-
-	for pos = 1, str_len do
-		local char = string.sub(str, pos, pos)
-		n = n + (string.byte(char)-base_char)*base^(str_len-pos)
-	end
-
-	return n
-end
-
-return base95
+-- hello this is a comment
+--[[
+hello
+this
+is
+a
+multi
+line
+comment
+]]
+()[]{}
+.
+..
+...
+do for end local function in while true false
